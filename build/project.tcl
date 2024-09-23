@@ -1,6 +1,6 @@
 # Product Version: Vivado v2019.2 (64-bit)
 
-set projName zc706_zedboard	
+set projName zc706_board
 set part xc7z045ffg900-2
 set top soc_wrapper	
 
