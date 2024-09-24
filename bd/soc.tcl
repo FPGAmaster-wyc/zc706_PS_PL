@@ -40,7 +40,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# WIDTH32to8, WIDTH8to32, axi_hp_wr, axi_lite_to_mm, regfile, uart_rx, uart_tx
+# WIDTH32to8, WIDTH8to32, axi_hp_wr, uart_rx, uart_tx, axi_lite_to_mm, regfile
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -51,7 +51,6 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 set list_projs [get_projects -quiet]
 if { $list_projs eq "" } {
    create_project project_1 myproj -part xc7z045ffg900-2
-   set_property BOARD_PART xilinx.com:zc706:part0:1.4 [current_project]
 }
 
 
@@ -131,10 +130,10 @@ set bCheckIPsPassed 1
 set bCheckIPs 1
 if { $bCheckIPs == 1 } {
    set list_check_ips "\ 
-xilinx.com:ip:fifo_generator:13.2\
 xilinx.com:ip:processing_system7:5.5\
-xilinx.com:ip:proc_sys_reset:5.0\
 xilinx.com:ip:smartconnect:1.0\
+xilinx.com:ip:fifo_generator:13.2\
+xilinx.com:ip:proc_sys_reset:5.0\
 xilinx.com:ip:system_ila:1.1\
 xilinx.com:ip:util_vector_logic:2.0\
 xilinx.com:ip:xlconstant:1.1\
@@ -166,10 +165,10 @@ if { $bCheckModules == 1 } {
 WIDTH32to8\
 WIDTH8to32\
 axi_hp_wr\
-axi_lite_to_mm\
-regfile\
 uart_rx\
 uart_tx\
+axi_lite_to_mm\
+regfile\
 "
 
    set list_mods_missing ""
@@ -198,16 +197,14 @@ if { $bCheckIPsPassed != 1 } {
 ##################################################################
 
 
-
-# Procedure to create entire design; Provide argument to make
-# procedure reusable. If parentCell is "", will use root.
-proc create_root_design { parentCell } {
+# Hierarchical cell: regfile
+proc create_hier_cell_regfile { parentCell nameHier } {
 
   variable script_folder
-  variable design_name
 
-  if { $parentCell eq "" } {
-     set parentCell [get_bd_cells /]
+  if { $parentCell eq "" || $nameHier eq "" } {
+     catch {common::send_msg_id "BD_TCL-102" "ERROR" "create_hier_cell_regfile() - Empty argument(s)!"}
+     return
   }
 
   # Get object for parentCell
@@ -230,18 +227,109 @@ proc create_root_design { parentCell } {
   # Set parent object as current
   current_bd_instance $parentObj
 
+  # Create cell and set as current instance
+  set hier_obj [create_bd_cell -type hier $nameHier]
+  current_bd_instance $hier_obj
 
-  # Create interface ports
-  set DDR [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:ddrx_rtl:1.0 DDR ]
-
-  set FIXED_IO [ create_bd_intf_port -mode Master -vlnv xilinx.com:display_processing_system7:fixedio_rtl:1.0 FIXED_IO ]
-
-  set UART_0 [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:uart_rtl:1.0 UART_0 ]
+  # Create interface pins
+  create_bd_intf_pin -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 s_axi
 
 
-  # Create ports
-  set rxd [ create_bd_port -dir I rxd ]
-  set txd [ create_bd_port -dir O txd ]
+  # Create pins
+  create_bd_pin -dir O done
+  create_bd_pin -dir I -type clk s_axi_aclk
+  create_bd_pin -dir I -type rst s_axi_aresetn
+
+  # Create instance: axi_lite_to_mm_0, and set properties
+  set block_name axi_lite_to_mm
+  set block_cell_name axi_lite_to_mm_0
+  if { [catch {set axi_lite_to_mm_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $axi_lite_to_mm_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+  
+  # Create instance: regfile_0, and set properties
+  set block_name regfile
+  set block_cell_name regfile_0
+  if { [catch {set regfile_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $regfile_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+  
+  # Create instance: xlconstant_1, and set properties
+  set xlconstant_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 xlconstant_1 ]
+
+  # Create interface connections
+  connect_bd_intf_net -intf_net smartconnect_1_M00_AXI [get_bd_intf_pins s_axi] [get_bd_intf_pins axi_lite_to_mm_0/s_axi]
+
+  # Create port connections
+  connect_bd_net -net axi_lite_to_mm_0_rd_addr [get_bd_pins axi_lite_to_mm_0/rd_addr] [get_bd_pins regfile_0/rd_addr]
+  connect_bd_net -net axi_lite_to_mm_0_rd_en [get_bd_pins axi_lite_to_mm_0/rd_en] [get_bd_pins regfile_0/rd_en]
+  connect_bd_net -net axi_lite_to_mm_0_wr_addr [get_bd_pins axi_lite_to_mm_0/wr_addr] [get_bd_pins regfile_0/wr_addr]
+  connect_bd_net -net axi_lite_to_mm_0_wr_be [get_bd_pins axi_lite_to_mm_0/wr_be] [get_bd_pins regfile_0/wr_be]
+  connect_bd_net -net axi_lite_to_mm_0_wr_dout [get_bd_pins axi_lite_to_mm_0/wr_dout] [get_bd_pins regfile_0/wr_dout]
+  connect_bd_net -net axi_lite_to_mm_0_wr_en [get_bd_pins axi_lite_to_mm_0/wr_en] [get_bd_pins regfile_0/wr_en]
+  connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins s_axi_aclk] [get_bd_pins axi_lite_to_mm_0/s_axi_aclk] [get_bd_pins regfile_0/aclk]
+  connect_bd_net -net regfile_0_done [get_bd_pins done] [get_bd_pins regfile_0/done]
+  connect_bd_net -net regfile_0_rd_din [get_bd_pins axi_lite_to_mm_0/rd_din] [get_bd_pins regfile_0/rd_din]
+  connect_bd_net -net rst_ps7_0_50M_peripheral_aresetn [get_bd_pins s_axi_aresetn] [get_bd_pins axi_lite_to_mm_0/s_axi_aresetn] [get_bd_pins regfile_0/aresetn]
+  connect_bd_net -net xlconstant_1_dout [get_bd_pins axi_lite_to_mm_0/rd_ready] [get_bd_pins axi_lite_to_mm_0/wr_ready] [get_bd_pins xlconstant_1/dout]
+
+  # Restore current instance
+  current_bd_instance $oldCurInst
+}
+
+# Hierarchical cell: UART_DMA
+proc create_hier_cell_UART_DMA { parentCell nameHier } {
+
+  variable script_folder
+
+  if { $parentCell eq "" || $nameHier eq "" } {
+     catch {common::send_msg_id "BD_TCL-102" "ERROR" "create_hier_cell_UART_DMA() - Empty argument(s)!"}
+     return
+  }
+
+  # Get object for parentCell
+  set parentObj [get_bd_cells $parentCell]
+  if { $parentObj == "" } {
+     catch {common::send_msg_id "BD_TCL-100" "ERROR" "Unable to find parent cell <$parentCell>!"}
+     return
+  }
+
+  # Make sure parentObj is hier blk
+  set parentType [get_property TYPE $parentObj]
+  if { $parentType ne "hier" } {
+     catch {common::send_msg_id "BD_TCL-101" "ERROR" "Parent <$parentObj> has TYPE = <$parentType>. Expected to be <hier>."}
+     return
+  }
+
+  # Save current instance; Restore later
+  set oldCurInst [current_bd_instance .]
+
+  # Set parent object as current
+  current_bd_instance $parentObj
+
+  # Create cell and set as current instance
+  set hier_obj [create_bd_cell -type hier $nameHier]
+  current_bd_instance $hier_obj
+
+  # Create interface pins
+  create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 m_axi
+
+
+  # Create pins
+  create_bd_pin -dir I -type clk clk
+  create_bd_pin -dir I -type rst ext_reset_in
+  create_bd_pin -dir I i_wr_done
+  create_bd_pin -dir O -from 0 -to 0 -type rst peripheral_aresetn
+  create_bd_pin -dir I rxd
+  create_bd_pin -dir O txd
 
   # Create instance: WIDTH32to8_0, and set properties
   set block_name WIDTH32to8
@@ -279,17 +367,6 @@ proc create_root_design { parentCell } {
    CONFIG.M_AXI_DATA_WIDTH {32} \
  ] $axi_hp_wr_0
 
-  # Create instance: axi_lite_to_mm_0, and set properties
-  set block_name axi_lite_to_mm
-  set block_cell_name axi_lite_to_mm_0
-  if { [catch {set axi_lite_to_mm_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
-     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   } elseif { $axi_lite_to_mm_0 eq "" } {
-     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   }
-  
   # Create instance: fifo_generator_0, and set properties
   set fifo_generator_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:fifo_generator:13.2 fifo_generator_0 ]
   set_property -dict [ list \
@@ -362,6 +439,169 @@ proc create_root_design { parentCell } {
    CONFIG.Use_Embedded_Registers {false} \
    CONFIG.Write_Acknowledge_Flag {false} \
  ] $fifo_generator_2
+
+  # Create instance: rst_ps7_0_50M, and set properties
+  set rst_ps7_0_50M [ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 rst_ps7_0_50M ]
+
+  # Create instance: system_ila_0, and set properties
+  set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
+  set_property -dict [ list \
+   CONFIG.C_BRAM_CNT {0.5} \
+   CONFIG.C_MON_TYPE {NATIVE} \
+   CONFIG.C_NUM_OF_PROBES {3} \
+ ] $system_ila_0
+
+  # Create instance: system_ila_1, and set properties
+  set system_ila_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_1 ]
+  set_property -dict [ list \
+   CONFIG.C_BRAM_CNT {0.5} \
+   CONFIG.C_MON_TYPE {NATIVE} \
+   CONFIG.C_NUM_OF_PROBES {3} \
+ ] $system_ila_1
+
+  # Create instance: system_ila_2, and set properties
+  set system_ila_2 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_2 ]
+  set_property -dict [ list \
+   CONFIG.C_BRAM_CNT {6} \
+   CONFIG.C_MON_TYPE {MIX} \
+   CONFIG.C_NUM_OF_PROBES {4} \
+ ] $system_ila_2
+
+  # Create instance: system_ila_3, and set properties
+  set system_ila_3 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_3 ]
+  set_property -dict [ list \
+   CONFIG.C_BRAM_CNT {1} \
+   CONFIG.C_DATA_DEPTH {8192} \
+   CONFIG.C_MON_TYPE {NATIVE} \
+   CONFIG.C_NUM_OF_PROBES {4} \
+ ] $system_ila_3
+
+  # Create instance: uart_rx_0, and set properties
+  set block_name uart_rx
+  set block_cell_name uart_rx_0
+  if { [catch {set uart_rx_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $uart_rx_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+    set_property -dict [ list \
+   CONFIG.CLK_FREQ {100000000} \
+   CONFIG.UART_BPS {115200} \
+ ] $uart_rx_0
+
+  # Create instance: uart_tx_0, and set properties
+  set block_name uart_tx
+  set block_cell_name uart_tx_0
+  if { [catch {set uart_tx_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $uart_tx_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+    set_property -dict [ list \
+   CONFIG.CLK_FREQ {100000000} \
+   CONFIG.UART_BPS {115200} \
+ ] $uart_tx_0
+
+  # Create instance: util_vector_logic_0, and set properties
+  set util_vector_logic_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 util_vector_logic_0 ]
+  set_property -dict [ list \
+   CONFIG.C_OPERATION {not} \
+   CONFIG.C_SIZE {1} \
+   CONFIG.LOGO_FILE {data/sym_notgate.png} \
+ ] $util_vector_logic_0
+
+  # Create instance: xlconstant_0, and set properties
+  set xlconstant_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 xlconstant_0 ]
+
+  # Create interface connections
+  connect_bd_intf_net -intf_net axi_hp_wr_0_M_RD [get_bd_intf_pins axi_hp_wr_0/M_RD] [get_bd_intf_pins fifo_generator_1/S_AXIS]
+  connect_bd_intf_net -intf_net axi_hp_wr_0_m_axi [get_bd_intf_pins m_axi] [get_bd_intf_pins axi_hp_wr_0/m_axi]
+  connect_bd_intf_net -intf_net [get_bd_intf_nets axi_hp_wr_0_m_axi] [get_bd_intf_pins m_axi] [get_bd_intf_pins system_ila_2/SLOT_0_AXI]
+  connect_bd_intf_net -intf_net fifo_generator_0_M_AXIS [get_bd_intf_pins axi_hp_wr_0/S_WR] [get_bd_intf_pins fifo_generator_0/M_AXIS]
+
+  # Create port connections
+  connect_bd_net -net WIDTH32to8_0_data_out [get_bd_pins WIDTH32to8_0/data_out] [get_bd_pins fifo_generator_2/din] [get_bd_pins system_ila_1/probe2]
+  connect_bd_net -net WIDTH32to8_0_data_valid [get_bd_pins WIDTH32to8_0/data_valid] [get_bd_pins fifo_generator_2/wr_en] [get_bd_pins system_ila_1/probe1]
+  connect_bd_net -net WIDTH32to8_0_ready [get_bd_pins WIDTH32to8_0/ready] [get_bd_pins fifo_generator_1/m_axis_tready] [get_bd_pins system_ila_1/probe0]
+  connect_bd_net -net WIDTH8to32_0_data_last [get_bd_pins WIDTH8to32_0/data_last] [get_bd_pins fifo_generator_0/s_axis_tlast] [get_bd_pins system_ila_0/probe0]
+  connect_bd_net -net WIDTH8to32_0_data_out [get_bd_pins WIDTH8to32_0/data_out] [get_bd_pins fifo_generator_0/s_axis_tdata] [get_bd_pins system_ila_0/probe2]
+  connect_bd_net -net WIDTH8to32_0_data_valid [get_bd_pins WIDTH8to32_0/data_valid] [get_bd_pins fifo_generator_0/s_axis_tvalid] [get_bd_pins system_ila_0/probe1]
+  connect_bd_net -net axi_hp_wr_0_debug_c_state [get_bd_pins axi_hp_wr_0/debug_c_state] [get_bd_pins system_ila_2/probe0]
+  connect_bd_net -net axi_hp_wr_0_debug_n_state [get_bd_pins axi_hp_wr_0/debug_n_state] [get_bd_pins system_ila_2/probe1]
+  connect_bd_net -net axi_hp_wr_0_debug_rd_c_state [get_bd_pins axi_hp_wr_0/debug_rd_c_state] [get_bd_pins system_ila_2/probe3]
+  connect_bd_net -net axi_hp_wr_0_debug_rd_n_state [get_bd_pins axi_hp_wr_0/debug_rd_n_state] [get_bd_pins system_ila_2/probe2]
+  connect_bd_net -net fifo_generator_1_m_axis_tdata [get_bd_pins WIDTH32to8_0/data_in] [get_bd_pins fifo_generator_1/m_axis_tdata]
+  connect_bd_net -net fifo_generator_1_m_axis_tvalid [get_bd_pins WIDTH32to8_0/data_en] [get_bd_pins fifo_generator_1/m_axis_tvalid]
+  connect_bd_net -net fifo_generator_2_data_count [get_bd_pins fifo_generator_2/data_count] [get_bd_pins system_ila_3/probe3]
+  connect_bd_net -net fifo_generator_2_dout [get_bd_pins fifo_generator_2/dout] [get_bd_pins system_ila_3/probe2] [get_bd_pins uart_tx_0/pi_data]
+  connect_bd_net -net fifo_generator_2_empty [get_bd_pins fifo_generator_2/empty] [get_bd_pins system_ila_3/probe1] [get_bd_pins uart_tx_0/empty]
+  connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins clk] [get_bd_pins WIDTH32to8_0/clk] [get_bd_pins WIDTH8to32_0/clk] [get_bd_pins axi_hp_wr_0/i_clk] [get_bd_pins axi_hp_wr_0/m_axi_aclk] [get_bd_pins fifo_generator_0/s_aclk] [get_bd_pins fifo_generator_1/s_aclk] [get_bd_pins fifo_generator_2/clk] [get_bd_pins rst_ps7_0_50M/slowest_sync_clk] [get_bd_pins system_ila_0/clk] [get_bd_pins system_ila_1/clk] [get_bd_pins system_ila_2/clk] [get_bd_pins system_ila_3/clk] [get_bd_pins uart_rx_0/sys_clk] [get_bd_pins uart_tx_0/sys_clk]
+  connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins ext_reset_in] [get_bd_pins rst_ps7_0_50M/ext_reset_in]
+  connect_bd_net -net regfile_0_done [get_bd_pins i_wr_done] [get_bd_pins axi_hp_wr_0/i_wr_done]
+  connect_bd_net -net rst_ps7_0_50M_peripheral_aresetn [get_bd_pins peripheral_aresetn] [get_bd_pins WIDTH32to8_0/rst_n] [get_bd_pins WIDTH8to32_0/rst_n] [get_bd_pins axi_hp_wr_0/i_rst_n] [get_bd_pins axi_hp_wr_0/m_axi_aresetn] [get_bd_pins fifo_generator_0/s_aresetn] [get_bd_pins fifo_generator_1/s_aresetn] [get_bd_pins rst_ps7_0_50M/peripheral_aresetn] [get_bd_pins system_ila_2/resetn] [get_bd_pins uart_rx_0/sys_rst_n] [get_bd_pins uart_tx_0/sys_rst_n] [get_bd_pins util_vector_logic_0/Op1]
+  connect_bd_net -net rx_0_1 [get_bd_pins rxd] [get_bd_pins uart_rx_0/rx]
+  connect_bd_net -net uart_rx_0_po_data [get_bd_pins WIDTH8to32_0/data_in] [get_bd_pins uart_rx_0/po_data]
+  connect_bd_net -net uart_rx_0_po_flag [get_bd_pins WIDTH8to32_0/data_en] [get_bd_pins uart_rx_0/po_flag]
+  connect_bd_net -net uart_tx_0_ready [get_bd_pins fifo_generator_2/rd_en] [get_bd_pins system_ila_3/probe0] [get_bd_pins uart_tx_0/ready]
+  connect_bd_net -net uart_tx_0_tx [get_bd_pins txd] [get_bd_pins uart_tx_0/tx]
+  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins fifo_generator_2/srst] [get_bd_pins util_vector_logic_0/Res]
+  connect_bd_net -net xlconstant_0_dout [get_bd_pins axi_hp_wr_0/m_axi_init_axi_txn] [get_bd_pins xlconstant_0/dout]
+
+  # Restore current instance
+  current_bd_instance $oldCurInst
+}
+
+
+# Procedure to create entire design; Provide argument to make
+# procedure reusable. If parentCell is "", will use root.
+proc create_root_design { parentCell } {
+
+  variable script_folder
+  variable design_name
+
+  if { $parentCell eq "" } {
+     set parentCell [get_bd_cells /]
+  }
+
+  # Get object for parentCell
+  set parentObj [get_bd_cells $parentCell]
+  if { $parentObj == "" } {
+     catch {common::send_msg_id "BD_TCL-100" "ERROR" "Unable to find parent cell <$parentCell>!"}
+     return
+  }
+
+  # Make sure parentObj is hier blk
+  set parentType [get_property TYPE $parentObj]
+  if { $parentType ne "hier" } {
+     catch {common::send_msg_id "BD_TCL-101" "ERROR" "Parent <$parentObj> has TYPE = <$parentType>. Expected to be <hier>."}
+     return
+  }
+
+  # Save current instance; Restore later
+  set oldCurInst [current_bd_instance .]
+
+  # Set parent object as current
+  current_bd_instance $parentObj
+
+
+  # Create interface ports
+  set DDR [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:ddrx_rtl:1.0 DDR ]
+
+  set FIXED_IO [ create_bd_intf_port -mode Master -vlnv xilinx.com:display_processing_system7:fixedio_rtl:1.0 FIXED_IO ]
+
+  set UART_0 [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:uart_rtl:1.0 UART_0 ]
+
+
+  # Create ports
+  set rxd [ create_bd_port -dir I rxd ]
+  set txd [ create_bd_port -dir O txd ]
+
+  # Create instance: UART_DMA
+  create_hier_cell_UART_DMA [current_bd_instance .] UART_DMA
 
   # Create instance: processing_system7_0, and set properties
   set processing_system7_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 processing_system7_0 ]
@@ -776,19 +1016,8 @@ proc create_root_design { parentCell } {
    CONFIG.preset {ZC706} \
  ] $processing_system7_0
 
-  # Create instance: regfile_0, and set properties
-  set block_name regfile
-  set block_cell_name regfile_0
-  if { [catch {set regfile_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
-     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   } elseif { $regfile_0 eq "" } {
-     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   }
-  
-  # Create instance: rst_ps7_0_50M, and set properties
-  set rst_ps7_0_50M [ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 rst_ps7_0_50M ]
+  # Create instance: regfile
+  create_hier_cell_regfile [current_bd_instance .] regfile
 
   # Create instance: smartconnect_0, and set properties
   set smartconnect_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 smartconnect_0 ]
@@ -802,134 +1031,26 @@ proc create_root_design { parentCell } {
    CONFIG.NUM_SI {1} \
  ] $smartconnect_1
 
-  # Create instance: system_ila_0, and set properties
-  set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
-  set_property -dict [ list \
-   CONFIG.C_BRAM_CNT {0.5} \
-   CONFIG.C_MON_TYPE {NATIVE} \
-   CONFIG.C_NUM_OF_PROBES {3} \
- ] $system_ila_0
-
-  # Create instance: system_ila_1, and set properties
-  set system_ila_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_1 ]
-  set_property -dict [ list \
-   CONFIG.C_BRAM_CNT {0.5} \
-   CONFIG.C_MON_TYPE {NATIVE} \
-   CONFIG.C_NUM_OF_PROBES {3} \
- ] $system_ila_1
-
-  # Create instance: system_ila_2, and set properties
-  set system_ila_2 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_2 ]
-  set_property -dict [ list \
-   CONFIG.C_BRAM_CNT {6} \
-   CONFIG.C_MON_TYPE {MIX} \
-   CONFIG.C_NUM_OF_PROBES {4} \
- ] $system_ila_2
-
-  # Create instance: system_ila_3, and set properties
-  set system_ila_3 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_3 ]
-  set_property -dict [ list \
-   CONFIG.C_BRAM_CNT {1} \
-   CONFIG.C_DATA_DEPTH {8192} \
-   CONFIG.C_MON_TYPE {NATIVE} \
-   CONFIG.C_NUM_OF_PROBES {4} \
- ] $system_ila_3
-
-  # Create instance: uart_rx_0, and set properties
-  set block_name uart_rx
-  set block_cell_name uart_rx_0
-  if { [catch {set uart_rx_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
-     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   } elseif { $uart_rx_0 eq "" } {
-     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   }
-    set_property -dict [ list \
-   CONFIG.CLK_FREQ {100000000} \
-   CONFIG.UART_BPS {115200} \
- ] $uart_rx_0
-
-  # Create instance: uart_tx_0, and set properties
-  set block_name uart_tx
-  set block_cell_name uart_tx_0
-  if { [catch {set uart_tx_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
-     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   } elseif { $uart_tx_0 eq "" } {
-     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   }
-    set_property -dict [ list \
-   CONFIG.CLK_FREQ {100000000} \
-   CONFIG.UART_BPS {115200} \
- ] $uart_tx_0
-
-  # Create instance: util_vector_logic_0, and set properties
-  set util_vector_logic_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 util_vector_logic_0 ]
-  set_property -dict [ list \
-   CONFIG.C_OPERATION {not} \
-   CONFIG.C_SIZE {1} \
-   CONFIG.LOGO_FILE {data/sym_notgate.png} \
- ] $util_vector_logic_0
-
-  # Create instance: xlconstant_0, and set properties
-  set xlconstant_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 xlconstant_0 ]
-
-  # Create instance: xlconstant_1, and set properties
-  set xlconstant_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 xlconstant_1 ]
-
   # Create interface connections
-  connect_bd_intf_net -intf_net axi_hp_wr_0_M_RD [get_bd_intf_pins axi_hp_wr_0/M_RD] [get_bd_intf_pins fifo_generator_1/S_AXIS]
-  connect_bd_intf_net -intf_net axi_hp_wr_0_m_axi [get_bd_intf_pins axi_hp_wr_0/m_axi] [get_bd_intf_pins smartconnect_0/S00_AXI]
-connect_bd_intf_net -intf_net [get_bd_intf_nets axi_hp_wr_0_m_axi] [get_bd_intf_pins smartconnect_0/S00_AXI] [get_bd_intf_pins system_ila_2/SLOT_0_AXI]
-  connect_bd_intf_net -intf_net fifo_generator_0_M_AXIS [get_bd_intf_pins axi_hp_wr_0/S_WR] [get_bd_intf_pins fifo_generator_0/M_AXIS]
+  connect_bd_intf_net -intf_net axi_hp_wr_0_m_axi [get_bd_intf_pins UART_DMA/m_axi] [get_bd_intf_pins smartconnect_0/S00_AXI]
   connect_bd_intf_net -intf_net processing_system7_0_DDR [get_bd_intf_ports DDR] [get_bd_intf_pins processing_system7_0/DDR]
   connect_bd_intf_net -intf_net processing_system7_0_FIXED_IO [get_bd_intf_ports FIXED_IO] [get_bd_intf_pins processing_system7_0/FIXED_IO]
   connect_bd_intf_net -intf_net processing_system7_0_M_AXI_GP0 [get_bd_intf_pins processing_system7_0/M_AXI_GP0] [get_bd_intf_pins smartconnect_1/S00_AXI]
   connect_bd_intf_net -intf_net processing_system7_0_UART_0 [get_bd_intf_ports UART_0] [get_bd_intf_pins processing_system7_0/UART_0]
   connect_bd_intf_net -intf_net smartconnect_0_M00_AXI [get_bd_intf_pins processing_system7_0/S_AXI_HP0] [get_bd_intf_pins smartconnect_0/M00_AXI]
-  connect_bd_intf_net -intf_net smartconnect_1_M00_AXI [get_bd_intf_pins axi_lite_to_mm_0/s_axi] [get_bd_intf_pins smartconnect_1/M00_AXI]
+  connect_bd_intf_net -intf_net smartconnect_1_M00_AXI [get_bd_intf_pins regfile/s_axi] [get_bd_intf_pins smartconnect_1/M00_AXI]
 
   # Create port connections
-  connect_bd_net -net WIDTH32to8_0_data_out [get_bd_pins WIDTH32to8_0/data_out] [get_bd_pins fifo_generator_2/din] [get_bd_pins system_ila_1/probe2]
-  connect_bd_net -net WIDTH32to8_0_data_valid [get_bd_pins WIDTH32to8_0/data_valid] [get_bd_pins fifo_generator_2/wr_en] [get_bd_pins system_ila_1/probe1]
-  connect_bd_net -net WIDTH32to8_0_ready [get_bd_pins WIDTH32to8_0/ready] [get_bd_pins fifo_generator_1/m_axis_tready] [get_bd_pins system_ila_1/probe0]
-  connect_bd_net -net WIDTH8to32_0_data_last [get_bd_pins WIDTH8to32_0/data_last] [get_bd_pins fifo_generator_0/s_axis_tlast] [get_bd_pins system_ila_0/probe0]
-  connect_bd_net -net WIDTH8to32_0_data_out [get_bd_pins WIDTH8to32_0/data_out] [get_bd_pins fifo_generator_0/s_axis_tdata] [get_bd_pins system_ila_0/probe2]
-  connect_bd_net -net WIDTH8to32_0_data_valid [get_bd_pins WIDTH8to32_0/data_valid] [get_bd_pins fifo_generator_0/s_axis_tvalid] [get_bd_pins system_ila_0/probe1]
-  connect_bd_net -net axi_hp_wr_0_debug_c_state [get_bd_pins axi_hp_wr_0/debug_c_state] [get_bd_pins system_ila_2/probe0]
-  connect_bd_net -net axi_hp_wr_0_debug_n_state [get_bd_pins axi_hp_wr_0/debug_n_state] [get_bd_pins system_ila_2/probe1]
-  connect_bd_net -net axi_hp_wr_0_debug_rd_c_state [get_bd_pins axi_hp_wr_0/debug_rd_c_state] [get_bd_pins system_ila_2/probe3]
-  connect_bd_net -net axi_hp_wr_0_debug_rd_n_state [get_bd_pins axi_hp_wr_0/debug_rd_n_state] [get_bd_pins system_ila_2/probe2]
-  connect_bd_net -net axi_lite_to_mm_0_rd_addr [get_bd_pins axi_lite_to_mm_0/rd_addr] [get_bd_pins regfile_0/rd_addr]
-  connect_bd_net -net axi_lite_to_mm_0_rd_en [get_bd_pins axi_lite_to_mm_0/rd_en] [get_bd_pins regfile_0/rd_en]
-  connect_bd_net -net axi_lite_to_mm_0_wr_addr [get_bd_pins axi_lite_to_mm_0/wr_addr] [get_bd_pins regfile_0/wr_addr]
-  connect_bd_net -net axi_lite_to_mm_0_wr_be [get_bd_pins axi_lite_to_mm_0/wr_be] [get_bd_pins regfile_0/wr_be]
-  connect_bd_net -net axi_lite_to_mm_0_wr_dout [get_bd_pins axi_lite_to_mm_0/wr_dout] [get_bd_pins regfile_0/wr_dout]
-  connect_bd_net -net axi_lite_to_mm_0_wr_en [get_bd_pins axi_lite_to_mm_0/wr_en] [get_bd_pins regfile_0/wr_en]
-  connect_bd_net -net fifo_generator_1_m_axis_tdata [get_bd_pins WIDTH32to8_0/data_in] [get_bd_pins fifo_generator_1/m_axis_tdata]
-  connect_bd_net -net fifo_generator_1_m_axis_tvalid [get_bd_pins WIDTH32to8_0/data_en] [get_bd_pins fifo_generator_1/m_axis_tvalid]
-  connect_bd_net -net fifo_generator_2_data_count [get_bd_pins fifo_generator_2/data_count] [get_bd_pins system_ila_3/probe3]
-  connect_bd_net -net fifo_generator_2_dout [get_bd_pins fifo_generator_2/dout] [get_bd_pins system_ila_3/probe2] [get_bd_pins uart_tx_0/pi_data]
-  connect_bd_net -net fifo_generator_2_empty [get_bd_pins fifo_generator_2/empty] [get_bd_pins system_ila_3/probe1] [get_bd_pins uart_tx_0/empty]
-  connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins WIDTH32to8_0/clk] [get_bd_pins WIDTH8to32_0/clk] [get_bd_pins axi_hp_wr_0/i_clk] [get_bd_pins axi_hp_wr_0/m_axi_aclk] [get_bd_pins axi_lite_to_mm_0/s_axi_aclk] [get_bd_pins fifo_generator_0/s_aclk] [get_bd_pins fifo_generator_1/s_aclk] [get_bd_pins fifo_generator_2/clk] [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK] [get_bd_pins processing_system7_0/S_AXI_HP0_ACLK] [get_bd_pins regfile_0/aclk] [get_bd_pins rst_ps7_0_50M/slowest_sync_clk] [get_bd_pins smartconnect_0/aclk] [get_bd_pins smartconnect_1/aclk] [get_bd_pins system_ila_0/clk] [get_bd_pins system_ila_1/clk] [get_bd_pins system_ila_2/clk] [get_bd_pins system_ila_3/clk] [get_bd_pins uart_rx_0/sys_clk] [get_bd_pins uart_tx_0/sys_clk]
-  connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins processing_system7_0/FCLK_RESET0_N] [get_bd_pins rst_ps7_0_50M/ext_reset_in]
-  connect_bd_net -net regfile_0_done [get_bd_pins axi_hp_wr_0/i_wr_done] [get_bd_pins regfile_0/done]
-  connect_bd_net -net regfile_0_rd_din [get_bd_pins axi_lite_to_mm_0/rd_din] [get_bd_pins regfile_0/rd_din]
-  connect_bd_net -net rst_ps7_0_50M_peripheral_aresetn [get_bd_pins WIDTH32to8_0/rst_n] [get_bd_pins WIDTH8to32_0/rst_n] [get_bd_pins axi_hp_wr_0/i_rst_n] [get_bd_pins axi_hp_wr_0/m_axi_aresetn] [get_bd_pins axi_lite_to_mm_0/s_axi_aresetn] [get_bd_pins fifo_generator_0/s_aresetn] [get_bd_pins fifo_generator_1/s_aresetn] [get_bd_pins regfile_0/aresetn] [get_bd_pins rst_ps7_0_50M/peripheral_aresetn] [get_bd_pins smartconnect_0/aresetn] [get_bd_pins smartconnect_1/aresetn] [get_bd_pins system_ila_2/resetn] [get_bd_pins uart_rx_0/sys_rst_n] [get_bd_pins uart_tx_0/sys_rst_n] [get_bd_pins util_vector_logic_0/Op1]
-  connect_bd_net -net rx_0_1 [get_bd_ports rxd] [get_bd_pins uart_rx_0/rx]
-  connect_bd_net -net uart_rx_0_po_data [get_bd_pins WIDTH8to32_0/data_in] [get_bd_pins uart_rx_0/po_data]
-  connect_bd_net -net uart_rx_0_po_flag [get_bd_pins WIDTH8to32_0/data_en] [get_bd_pins uart_rx_0/po_flag]
-  connect_bd_net -net uart_tx_0_ready [get_bd_pins fifo_generator_2/rd_en] [get_bd_pins system_ila_3/probe0] [get_bd_pins uart_tx_0/ready]
-  connect_bd_net -net uart_tx_0_tx [get_bd_ports txd] [get_bd_pins uart_tx_0/tx]
-  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins fifo_generator_2/srst] [get_bd_pins util_vector_logic_0/Res]
-  connect_bd_net -net xlconstant_0_dout [get_bd_pins axi_hp_wr_0/m_axi_init_axi_txn] [get_bd_pins xlconstant_0/dout]
-  connect_bd_net -net xlconstant_1_dout [get_bd_pins axi_lite_to_mm_0/rd_ready] [get_bd_pins axi_lite_to_mm_0/wr_ready] [get_bd_pins xlconstant_1/dout]
+  connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins UART_DMA/clk] [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK] [get_bd_pins processing_system7_0/S_AXI_HP0_ACLK] [get_bd_pins regfile/s_axi_aclk] [get_bd_pins smartconnect_0/aclk] [get_bd_pins smartconnect_1/aclk]
+  connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins UART_DMA/ext_reset_in] [get_bd_pins processing_system7_0/FCLK_RESET0_N]
+  connect_bd_net -net regfile_0_done [get_bd_pins UART_DMA/i_wr_done] [get_bd_pins regfile/done]
+  connect_bd_net -net rst_ps7_0_50M_peripheral_aresetn [get_bd_pins UART_DMA/peripheral_aresetn] [get_bd_pins regfile/s_axi_aresetn] [get_bd_pins smartconnect_0/aresetn] [get_bd_pins smartconnect_1/aresetn]
+  connect_bd_net -net rx_0_1 [get_bd_ports rxd] [get_bd_pins UART_DMA/rxd]
+  connect_bd_net -net uart_tx_0_tx [get_bd_ports txd] [get_bd_pins UART_DMA/txd]
 
   # Create address segments
-  assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces axi_hp_wr_0/m_axi] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
-  assign_bd_address -offset 0x40000000 -range 0x01000000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_lite_to_mm_0/s_axi/reg0] -force
+  assign_bd_address -offset 0x40000000 -range 0x01000000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs regfile/axi_lite_to_mm_0/s_axi/reg0] -force
+  assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces UART_DMA/axi_hp_wr_0/m_axi] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
 
 
   # Restore current instance
