@@ -12,9 +12,12 @@ set_property -dict {PACKAGE_PIN AC18 IOSTANDARD LVCMOS18} [get_ports UART_0_txd]
 set_property -dict {PACKAGE_PIN AB16 IOSTANDARD LVCMOS18} [get_ports txd]
 set_property -dict {PACKAGE_PIN AC19 IOSTANDARD LVCMOS18} [get_ports rxd]
 
+set_property -dict {PACKAGE_PIN AB17 IOSTANDARD LVCMOS18} [get_ports sw_flag]
 set_property -dict {PACKAGE_PIN Y21 IOSTANDARD LVCMOS18} [get_ports gpio_rtl_tri_o]
 set_property -dict {PACKAGE_PIN K15 IOSTANDARD LVCMOS18} [get_ports key]
 set_property -dict {PACKAGE_PIN W21 IOSTANDARD LVCMOS18} [get_ports m00_axi_txn_done]
 set_property -dict {PACKAGE_PIN A17 IOSTANDARD LVCMOS18} [get_ports m00_axi_error]
+
+
 
 set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]

@@ -40,7 +40,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# WIDTH32to8, WIDTH8to32, axi_hp_wr, uart_rx, uart_tx, axi_lite_to_mm, regfile
+# gen_lvds_data, lvds2hp, rx_lvds, WIDTH32to8, WIDTH8to32, axi_hp_wr, uart_rx, uart_tx, axi_lite_to_mm, regfile
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -132,11 +132,12 @@ if { $bCheckIPs == 1 } {
    set list_check_ips "\ 
 xilinx.com:ip:processing_system7:5.5\
 xilinx.com:ip:smartconnect:1.0\
-xilinx.com:ip:fifo_generator:13.2\
-xilinx.com:ip:proc_sys_reset:5.0\
 xilinx.com:ip:system_ila:1.1\
-xilinx.com:ip:util_vector_logic:2.0\
+xilinx.com:ip:axis_dwidth_converter:1.1\
+xilinx.com:ip:fifo_generator:13.2\
 xilinx.com:ip:xlconstant:1.1\
+xilinx.com:ip:proc_sys_reset:5.0\
+xilinx.com:ip:util_vector_logic:2.0\
 "
 
    set list_ips_missing ""
@@ -162,6 +163,9 @@ xilinx.com:ip:xlconstant:1.1\
 set bCheckModules 1
 if { $bCheckModules == 1 } {
    set list_check_mods "\ 
+gen_lvds_data\
+lvds2hp\
+rx_lvds\
 WIDTH32to8\
 WIDTH8to32\
 axi_hp_wr\
@@ -325,7 +329,7 @@ proc create_hier_cell_UART_DMA { parentCell nameHier } {
 
   # Create pins
   create_bd_pin -dir I -type clk clk
-  create_bd_pin -dir I -type rst ext_reset_in
+  create_bd_pin -dir I -type rst i_resetn
   create_bd_pin -dir I i_wr_done
   create_bd_pin -dir O -from 0 -to 0 -type rst peripheral_aresetn
   create_bd_pin -dir I rxd
@@ -540,7 +544,7 @@ proc create_hier_cell_UART_DMA { parentCell nameHier } {
   connect_bd_net -net fifo_generator_2_dout [get_bd_pins fifo_generator_2/dout] [get_bd_pins system_ila_3/probe2] [get_bd_pins uart_tx_0/pi_data]
   connect_bd_net -net fifo_generator_2_empty [get_bd_pins fifo_generator_2/empty] [get_bd_pins system_ila_3/probe1] [get_bd_pins uart_tx_0/empty]
   connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins clk] [get_bd_pins WIDTH32to8_0/clk] [get_bd_pins WIDTH8to32_0/clk] [get_bd_pins axi_hp_wr_0/i_clk] [get_bd_pins axi_hp_wr_0/m_axi_aclk] [get_bd_pins fifo_generator_0/s_aclk] [get_bd_pins fifo_generator_1/s_aclk] [get_bd_pins fifo_generator_2/clk] [get_bd_pins rst_ps7_0_50M/slowest_sync_clk] [get_bd_pins system_ila_0/clk] [get_bd_pins system_ila_1/clk] [get_bd_pins system_ila_2/clk] [get_bd_pins system_ila_3/clk] [get_bd_pins uart_rx_0/sys_clk] [get_bd_pins uart_tx_0/sys_clk]
-  connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins ext_reset_in] [get_bd_pins rst_ps7_0_50M/ext_reset_in]
+  connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins i_resetn] [get_bd_pins rst_ps7_0_50M/ext_reset_in]
   connect_bd_net -net regfile_0_done [get_bd_pins i_wr_done] [get_bd_pins axi_hp_wr_0/i_wr_done]
   connect_bd_net -net rst_ps7_0_50M_peripheral_aresetn [get_bd_pins peripheral_aresetn] [get_bd_pins WIDTH32to8_0/rst_n] [get_bd_pins WIDTH8to32_0/rst_n] [get_bd_pins axi_hp_wr_0/i_rst_n] [get_bd_pins axi_hp_wr_0/m_axi_aresetn] [get_bd_pins fifo_generator_0/s_aresetn] [get_bd_pins fifo_generator_1/s_aresetn] [get_bd_pins rst_ps7_0_50M/peripheral_aresetn] [get_bd_pins system_ila_2/resetn] [get_bd_pins uart_rx_0/sys_rst_n] [get_bd_pins uart_tx_0/sys_rst_n] [get_bd_pins util_vector_logic_0/Op1]
   connect_bd_net -net rx_0_1 [get_bd_pins rxd] [get_bd_pins uart_rx_0/rx]
@@ -550,6 +554,151 @@ proc create_hier_cell_UART_DMA { parentCell nameHier } {
   connect_bd_net -net uart_tx_0_tx [get_bd_pins txd] [get_bd_pins uart_tx_0/tx]
   connect_bd_net -net util_vector_logic_0_Res [get_bd_pins fifo_generator_2/srst] [get_bd_pins util_vector_logic_0/Res]
   connect_bd_net -net xlconstant_0_dout [get_bd_pins axi_hp_wr_0/m_axi_init_axi_txn] [get_bd_pins xlconstant_0/dout]
+
+  # Restore current instance
+  current_bd_instance $oldCurInst
+}
+
+# Hierarchical cell: LVDS
+proc create_hier_cell_LVDS { parentCell nameHier } {
+
+  variable script_folder
+
+  if { $parentCell eq "" || $nameHier eq "" } {
+     catch {common::send_msg_id "BD_TCL-102" "ERROR" "create_hier_cell_LVDS() - Empty argument(s)!"}
+     return
+  }
+
+  # Get object for parentCell
+  set parentObj [get_bd_cells $parentCell]
+  if { $parentObj == "" } {
+     catch {common::send_msg_id "BD_TCL-100" "ERROR" "Unable to find parent cell <$parentCell>!"}
+     return
+  }
+
+  # Make sure parentObj is hier blk
+  set parentType [get_property TYPE $parentObj]
+  if { $parentType ne "hier" } {
+     catch {common::send_msg_id "BD_TCL-101" "ERROR" "Parent <$parentObj> has TYPE = <$parentType>. Expected to be <hier>."}
+     return
+  }
+
+  # Save current instance; Restore later
+  set oldCurInst [current_bd_instance .]
+
+  # Set parent object as current
+  current_bd_instance $parentObj
+
+  # Create cell and set as current instance
+  set hier_obj [create_bd_cell -type hier $nameHier]
+  current_bd_instance $hier_obj
+
+  # Create interface pins
+  create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 m_axi
+
+
+  # Create pins
+  create_bd_pin -dir I -type clk clk_100M
+  create_bd_pin -dir I -type clk clk_20M
+  create_bd_pin -dir I -type rst s_aresetn
+  create_bd_pin -dir I sw_flag_0
+
+  # Create instance: axis_dwidth_converter_0, and set properties
+  set axis_dwidth_converter_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axis_dwidth_converter:1.1 axis_dwidth_converter_0 ]
+  set_property -dict [ list \
+   CONFIG.M_TDATA_NUM_BYTES {4} \
+ ] $axis_dwidth_converter_0
+
+  # Create instance: fifo_generator_0, and set properties
+  set fifo_generator_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:fifo_generator:13.2 fifo_generator_0 ]
+  set_property -dict [ list \
+   CONFIG.Clock_Type_AXI {Independent_Clock} \
+   CONFIG.Empty_Threshold_Assert_Value_axis {4093} \
+   CONFIG.Empty_Threshold_Assert_Value_rach {13} \
+   CONFIG.Empty_Threshold_Assert_Value_rdch {1021} \
+   CONFIG.Empty_Threshold_Assert_Value_wach {13} \
+   CONFIG.Empty_Threshold_Assert_Value_wdch {1021} \
+   CONFIG.Empty_Threshold_Assert_Value_wrch {13} \
+   CONFIG.Enable_Safety_Circuit {true} \
+   CONFIG.Enable_TLAST {true} \
+   CONFIG.FIFO_Application_Type_axis {Packet_FIFO} \
+   CONFIG.FIFO_Implementation_axis {Independent_Clocks_Block_RAM} \
+   CONFIG.FIFO_Implementation_rach {Independent_Clocks_Distributed_RAM} \
+   CONFIG.FIFO_Implementation_rdch {Independent_Clocks_Block_RAM} \
+   CONFIG.FIFO_Implementation_wach {Independent_Clocks_Distributed_RAM} \
+   CONFIG.FIFO_Implementation_wdch {Independent_Clocks_Block_RAM} \
+   CONFIG.FIFO_Implementation_wrch {Independent_Clocks_Distributed_RAM} \
+   CONFIG.Full_Flags_Reset_Value {1} \
+   CONFIG.Full_Threshold_Assert_Value_axis {4095} \
+   CONFIG.Full_Threshold_Assert_Value_rach {15} \
+   CONFIG.Full_Threshold_Assert_Value_wach {15} \
+   CONFIG.Full_Threshold_Assert_Value_wrch {15} \
+   CONFIG.INTERFACE_TYPE {AXI_STREAM} \
+   CONFIG.Input_Depth_axis {4096} \
+   CONFIG.Reset_Type {Asynchronous_Reset} \
+   CONFIG.TDATA_NUM_BYTES {1} \
+   CONFIG.TKEEP_WIDTH {1} \
+   CONFIG.TSTRB_WIDTH {1} \
+   CONFIG.TUSER_WIDTH {0} \
+ ] $fifo_generator_0
+
+  # Create instance: gen_lvds_data_0, and set properties
+  set block_name gen_lvds_data
+  set block_cell_name gen_lvds_data_0
+  if { [catch {set gen_lvds_data_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $gen_lvds_data_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+  
+  # Create instance: lvds2hp_0, and set properties
+  set block_name lvds2hp
+  set block_cell_name lvds2hp_0
+  if { [catch {set lvds2hp_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $lvds2hp_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+    set_property -dict [ list \
+   CONFIG.M_AXI_DATA_WIDTH {32} \
+ ] $lvds2hp_0
+
+  # Create instance: rx_lvds_0, and set properties
+  set block_name rx_lvds
+  set block_cell_name rx_lvds_0
+  if { [catch {set rx_lvds_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $rx_lvds_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+  
+  # Create instance: xlconstant_0, and set properties
+  set xlconstant_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 xlconstant_0 ]
+  set_property -dict [ list \
+   CONFIG.CONST_VAL {0} \
+ ] $xlconstant_0
+
+  # Create interface connections
+  connect_bd_intf_net -intf_net axis_dwidth_converter_0_M_AXIS [get_bd_intf_pins axis_dwidth_converter_0/M_AXIS] [get_bd_intf_pins lvds2hp_0/S_WR]
+  connect_bd_intf_net -intf_net fifo_generator_0_M_AXIS [get_bd_intf_pins axis_dwidth_converter_0/S_AXIS] [get_bd_intf_pins fifo_generator_0/M_AXIS]
+  connect_bd_intf_net -intf_net lvds2hp_0_m_axi [get_bd_intf_pins m_axi] [get_bd_intf_pins lvds2hp_0/m_axi]
+  connect_bd_intf_net -intf_net rx_lvds_0_s_axis [get_bd_intf_pins fifo_generator_0/S_AXIS] [get_bd_intf_pins rx_lvds_0/s_axis]
+
+  # Create port connections
+  connect_bd_net -net Net [get_bd_pins clk_100M] [get_bd_pins axis_dwidth_converter_0/aclk] [get_bd_pins fifo_generator_0/m_aclk] [get_bd_pins lvds2hp_0/i_clk] [get_bd_pins lvds2hp_0/m_axi_aclk]
+  connect_bd_net -net gen_lvds_data_0_data0 [get_bd_pins gen_lvds_data_0/data0] [get_bd_pins rx_lvds_0/lvds_data0]
+  connect_bd_net -net gen_lvds_data_0_data1 [get_bd_pins gen_lvds_data_0/data1] [get_bd_pins rx_lvds_0/lvds_data1]
+  connect_bd_net -net gen_lvds_data_0_flag [get_bd_pins gen_lvds_data_0/flag] [get_bd_pins rx_lvds_0/lvds_flag]
+  connect_bd_net -net processing_system7_0_FCLK_CLK2 [get_bd_pins clk_20M] [get_bd_pins fifo_generator_0/s_aclk] [get_bd_pins gen_lvds_data_0/clk] [get_bd_pins rx_lvds_0/clk]
+  connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins s_aresetn] [get_bd_pins axis_dwidth_converter_0/aresetn] [get_bd_pins fifo_generator_0/s_aresetn] [get_bd_pins gen_lvds_data_0/rst_n] [get_bd_pins lvds2hp_0/i_rst_n] [get_bd_pins lvds2hp_0/m_axi_aresetn] [get_bd_pins rx_lvds_0/rst_n]
+  connect_bd_net -net sw_flag_0_1 [get_bd_pins sw_flag_0] [get_bd_pins gen_lvds_data_0/sw_flag]
+  connect_bd_net -net xlconstant_0_dout [get_bd_pins lvds2hp_0/m_axi_init_axi_txn] [get_bd_pins xlconstant_0/dout]
 
   # Restore current instance
   current_bd_instance $oldCurInst
@@ -598,7 +747,11 @@ proc create_root_design { parentCell } {
 
   # Create ports
   set rxd [ create_bd_port -dir I rxd ]
+  set sw_flag [ create_bd_port -dir I sw_flag ]
   set txd [ create_bd_port -dir O txd ]
+
+  # Create instance: LVDS
+  create_hier_cell_LVDS [current_bd_instance .] LVDS
 
   # Create instance: UART_DMA
   create_hier_cell_UART_DMA [current_bd_instance .] UART_DMA
@@ -612,8 +765,8 @@ proc create_root_design { parentCell } {
    CONFIG.PCW_ACT_ENET0_PERIPHERAL_FREQMHZ {25.000000} \
    CONFIG.PCW_ACT_ENET1_PERIPHERAL_FREQMHZ {10.000000} \
    CONFIG.PCW_ACT_FPGA0_PERIPHERAL_FREQMHZ {100.000000} \
-   CONFIG.PCW_ACT_FPGA1_PERIPHERAL_FREQMHZ {10.000000} \
-   CONFIG.PCW_ACT_FPGA2_PERIPHERAL_FREQMHZ {10.000000} \
+   CONFIG.PCW_ACT_FPGA1_PERIPHERAL_FREQMHZ {100.000000} \
+   CONFIG.PCW_ACT_FPGA2_PERIPHERAL_FREQMHZ {20.000000} \
    CONFIG.PCW_ACT_FPGA3_PERIPHERAL_FREQMHZ {10.000000} \
    CONFIG.PCW_ACT_PCAP_PERIPHERAL_FREQMHZ {200.000000} \
    CONFIG.PCW_ACT_QSPI_PERIPHERAL_FREQMHZ {200.000000} \
@@ -637,8 +790,8 @@ proc create_root_design { parentCell } {
    CONFIG.PCW_CAN_PERIPHERAL_DIVISOR1 {1} \
    CONFIG.PCW_CAN_PERIPHERAL_FREQMHZ {100} \
    CONFIG.PCW_CLK0_FREQ {100000000} \
-   CONFIG.PCW_CLK1_FREQ {10000000} \
-   CONFIG.PCW_CLK2_FREQ {10000000} \
+   CONFIG.PCW_CLK1_FREQ {100000000} \
+   CONFIG.PCW_CLK2_FREQ {20000000} \
    CONFIG.PCW_CLK3_FREQ {10000000} \
    CONFIG.PCW_CPU_CPU_PLL_FREQMHZ {1333.333} \
    CONFIG.PCW_CPU_PERIPHERAL_DIVISOR0 {2} \
@@ -663,6 +816,8 @@ proc create_root_design { parentCell } {
    CONFIG.PCW_ENET1_RESET_ENABLE {0} \
    CONFIG.PCW_ENET_RESET_ENABLE {1} \
    CONFIG.PCW_ENET_RESET_SELECT {Share reset pin} \
+   CONFIG.PCW_EN_CLK1_PORT {1} \
+   CONFIG.PCW_EN_CLK2_PORT {1} \
    CONFIG.PCW_EN_EMIO_TTC0 {0} \
    CONFIG.PCW_EN_EMIO_UART0 {1} \
    CONFIG.PCW_EN_ENET0 {1} \
@@ -676,16 +831,20 @@ proc create_root_design { parentCell } {
    CONFIG.PCW_EN_USB0 {1} \
    CONFIG.PCW_FCLK0_PERIPHERAL_DIVISOR0 {5} \
    CONFIG.PCW_FCLK0_PERIPHERAL_DIVISOR1 {2} \
-   CONFIG.PCW_FCLK1_PERIPHERAL_DIVISOR0 {1} \
-   CONFIG.PCW_FCLK1_PERIPHERAL_DIVISOR1 {1} \
-   CONFIG.PCW_FCLK2_PERIPHERAL_DIVISOR0 {1} \
-   CONFIG.PCW_FCLK2_PERIPHERAL_DIVISOR1 {1} \
+   CONFIG.PCW_FCLK1_PERIPHERAL_DIVISOR0 {5} \
+   CONFIG.PCW_FCLK1_PERIPHERAL_DIVISOR1 {2} \
+   CONFIG.PCW_FCLK2_PERIPHERAL_DIVISOR0 {10} \
+   CONFIG.PCW_FCLK2_PERIPHERAL_DIVISOR1 {5} \
    CONFIG.PCW_FCLK3_PERIPHERAL_DIVISOR0 {1} \
    CONFIG.PCW_FCLK3_PERIPHERAL_DIVISOR1 {1} \
+   CONFIG.PCW_FCLK_CLK1_BUF {TRUE} \
+   CONFIG.PCW_FCLK_CLK2_BUF {FALSE} \
    CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {100} \
+   CONFIG.PCW_FPGA1_PERIPHERAL_FREQMHZ {100} \
+   CONFIG.PCW_FPGA2_PERIPHERAL_FREQMHZ {20} \
    CONFIG.PCW_FPGA_FCLK0_ENABLE {1} \
-   CONFIG.PCW_FPGA_FCLK1_ENABLE {0} \
-   CONFIG.PCW_FPGA_FCLK2_ENABLE {0} \
+   CONFIG.PCW_FPGA_FCLK1_ENABLE {1} \
+   CONFIG.PCW_FPGA_FCLK2_ENABLE {1} \
    CONFIG.PCW_FPGA_FCLK3_ENABLE {0} \
    CONFIG.PCW_GPIO_MIO_GPIO_ENABLE {1} \
    CONFIG.PCW_GPIO_MIO_GPIO_IO {MIO} \
@@ -1022,7 +1181,9 @@ proc create_root_design { parentCell } {
   # Create instance: smartconnect_0, and set properties
   set smartconnect_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 smartconnect_0 ]
   set_property -dict [ list \
-   CONFIG.NUM_SI {1} \
+   CONFIG.NUM_CLKS {2} \
+   CONFIG.NUM_MI {1} \
+   CONFIG.NUM_SI {2} \
  ] $smartconnect_0
 
   # Create instance: smartconnect_1, and set properties
@@ -1031,8 +1192,13 @@ proc create_root_design { parentCell } {
    CONFIG.NUM_SI {1} \
  ] $smartconnect_1
 
+  # Create instance: system_ila_0, and set properties
+  set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
+
   # Create interface connections
   connect_bd_intf_net -intf_net axi_hp_wr_0_m_axi [get_bd_intf_pins UART_DMA/m_axi] [get_bd_intf_pins smartconnect_0/S00_AXI]
+  connect_bd_intf_net -intf_net lvds2hp_0_m_axi [get_bd_intf_pins LVDS/m_axi] [get_bd_intf_pins smartconnect_0/S01_AXI]
+connect_bd_intf_net -intf_net [get_bd_intf_nets lvds2hp_0_m_axi] [get_bd_intf_pins smartconnect_0/S01_AXI] [get_bd_intf_pins system_ila_0/SLOT_0_AXI]
   connect_bd_intf_net -intf_net processing_system7_0_DDR [get_bd_intf_ports DDR] [get_bd_intf_pins processing_system7_0/DDR]
   connect_bd_intf_net -intf_net processing_system7_0_FIXED_IO [get_bd_intf_ports FIXED_IO] [get_bd_intf_pins processing_system7_0/FIXED_IO]
   connect_bd_intf_net -intf_net processing_system7_0_M_AXI_GP0 [get_bd_intf_pins processing_system7_0/M_AXI_GP0] [get_bd_intf_pins smartconnect_1/S00_AXI]
@@ -1041,15 +1207,19 @@ proc create_root_design { parentCell } {
   connect_bd_intf_net -intf_net smartconnect_1_M00_AXI [get_bd_intf_pins regfile/s_axi] [get_bd_intf_pins smartconnect_1/M00_AXI]
 
   # Create port connections
+  connect_bd_net -net Net [get_bd_pins LVDS/clk_100M] [get_bd_pins processing_system7_0/FCLK_CLK1] [get_bd_pins smartconnect_0/aclk1] [get_bd_pins system_ila_0/clk]
   connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins UART_DMA/clk] [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK] [get_bd_pins processing_system7_0/S_AXI_HP0_ACLK] [get_bd_pins regfile/s_axi_aclk] [get_bd_pins smartconnect_0/aclk] [get_bd_pins smartconnect_1/aclk]
-  connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins UART_DMA/ext_reset_in] [get_bd_pins processing_system7_0/FCLK_RESET0_N]
+  connect_bd_net -net processing_system7_0_FCLK_CLK2 [get_bd_pins LVDS/clk_20M] [get_bd_pins processing_system7_0/FCLK_CLK2]
+  connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins LVDS/s_aresetn] [get_bd_pins UART_DMA/i_resetn] [get_bd_pins processing_system7_0/FCLK_RESET0_N] [get_bd_pins system_ila_0/resetn]
   connect_bd_net -net regfile_0_done [get_bd_pins UART_DMA/i_wr_done] [get_bd_pins regfile/done]
   connect_bd_net -net rst_ps7_0_50M_peripheral_aresetn [get_bd_pins UART_DMA/peripheral_aresetn] [get_bd_pins regfile/s_axi_aresetn] [get_bd_pins smartconnect_0/aresetn] [get_bd_pins smartconnect_1/aresetn]
   connect_bd_net -net rx_0_1 [get_bd_ports rxd] [get_bd_pins UART_DMA/rxd]
+  connect_bd_net -net sw_flag_0_1 [get_bd_ports sw_flag] [get_bd_pins LVDS/sw_flag_0]
   connect_bd_net -net uart_tx_0_tx [get_bd_ports txd] [get_bd_pins UART_DMA/txd]
 
   # Create address segments
   assign_bd_address -offset 0x40000000 -range 0x01000000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs regfile/axi_lite_to_mm_0/s_axi/reg0] -force
+  assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces LVDS/lvds2hp_0/m_axi] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
   assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces UART_DMA/axi_hp_wr_0/m_axi] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
 
 

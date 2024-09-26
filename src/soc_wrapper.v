@@ -1,7 +1,7 @@
 //Copyright 1986-2019 Xilinx, Inc. All Rights Reserved.
 //--------------------------------------------------------------------------------
 //Tool Version: Vivado v.2019.2 (win64) Build 2708876 Wed Nov  6 21:40:23 MST 2019
-//Date        : Mon Sep 23 10:52:46 2024
+//Date        : Thu Sep 26 15:42:49 2024
 //Host        : DESKTOP-I9U844P running 64-bit major release  (build 9200)
 //Command     : generate_target soc_wrapper.bd
 //Design      : soc_wrapper
@@ -34,6 +34,7 @@ module soc_wrapper
     UART_0_rxd,
     UART_0_txd,
     rxd,
+    sw_flag,
     txd);
   inout [14:0]DDR_addr;
   inout [2:0]DDR_ba;
@@ -59,6 +60,7 @@ module soc_wrapper
   input UART_0_rxd;
   output UART_0_txd;
   input rxd;
+  input sw_flag;
   output txd;
 
   wire [14:0]DDR_addr;
@@ -85,6 +87,7 @@ module soc_wrapper
   wire UART_0_rxd;
   wire UART_0_txd;
   wire rxd;
+  wire sw_flag;
   wire txd;
 
   soc soc_i
@@ -112,5 +115,6 @@ module soc_wrapper
         .UART_0_rxd(UART_0_rxd),
         .UART_0_txd(UART_0_txd),
         .rxd(rxd),
+        .sw_flag(sw_flag),
         .txd(txd));
 endmodule

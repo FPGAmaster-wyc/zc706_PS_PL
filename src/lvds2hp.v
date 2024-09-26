@@ -1,4 +1,4 @@
-module axi_hp_wr #
+module lvds2hp #
 (
 		parameter integer M_AXI_ADDR_WIDTH	= 32    ,
 		parameter integer M_AXI_DATA_WIDTH	= 64    
@@ -120,7 +120,7 @@ module axi_hp_wr #
                 STOP        =   3'd6;
 
     //大端转小端 输入数据处理
-    wire [M_AXI_DATA_WIDTH-1:0] i_data;   
+    wire [63:0] i_data;   
     wire        i_valid;
     wire        o_ready;
     wire        i_last;
@@ -155,14 +155,14 @@ module axi_hp_wr #
                 end
 
                 WR_DATA :   begin 
-                                if (number_cnt == aw_len - 1 && w_ready)
+                                if (number_cnt == aw_len && w_ready)
                                     n_state = LAST_DATA;
                                 else
                                     n_state = WR_DATA;
                 end
 
                 LAST_DATA    :   begin
-                                    if (w_ready)
+                                    if (w_last)
                                         n_state = STOP;
                                     else
                                         n_state = LAST_DATA;
@@ -192,7 +192,7 @@ module axi_hp_wr #
                 aw_burst        <= 0;
                 aw_valid        <= 0;   
 
-                aw_addr_cnt     <= 32'h10000000;                         
+                aw_addr_cnt     <= 32'h20000000;                         
              
             end
         else
@@ -207,7 +207,7 @@ module axi_hp_wr #
                                 aw_burst        <= 2'b01        ;
                                 aw_valid        <= 1            ;
                                 aw_addr         <= aw_addr_cnt  ;
-                                aw_len          <= 8'd3; 
+                                aw_len          <= 8'd223; 
                 end
 
                 WR_DATA :   begin
@@ -219,26 +219,33 @@ module axi_hp_wr #
                                     end 
                                 else
                                     begin
+                                        w_valid     <= 0;
                                         w_data      <= w_data       ;
                                     end
                 end
 
-                LAST_DATA    :   begin
-                                    w_last      <= 1            ;  
+                LAST_DATA    :   begin                          //最后一个数据 
                                     if (w_ready && i_valid)
                                     begin
+                                        w_last      <= 1; 
                                         w_valid     <= 1;
                                         w_data      <= i_data;
                                     end 
                                 else
                                     begin
+                                        w_last      <= 0;
+                                        w_valid     <= 0;
                                         w_data      <= w_data       ;
-                                    end                               //最后一个数据             
+                                    end                                           
                 end
 
-                STOP    :   begin                               
+                STOP    :   begin
                                 w_last  <= 0        ;
                                 w_valid <= 0        ;
+                                if (aw_addr_cnt < 32'h20001000)   
+                                    aw_addr_cnt <= aw_addr_cnt + 1024;
+                                else
+                                    aw_addr_cnt <= 32'h20000000;                                                              
                 end
 
                 default :   ;
@@ -384,7 +391,7 @@ module axi_hp_wr #
 
                 r_CMD_TX_LINE_B <= 0;
 
-                rd_addr_buff    <= 32'h1000_1000;
+                rd_addr_buff    <= 32'h2000_0000;
             end
         else
             case (rd_state_n)

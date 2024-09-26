@@ -26,6 +26,9 @@ proc run_create {} {
         ../src/uart_tx.v
         ../src/WIDTH8to32.v
         ../src/WIDTH32to8.v
+        ../src/gen_lvds_data.v
+        ../src/lvds2hp.v
+        ../src/rx_lvds.v
     }
 	
 
