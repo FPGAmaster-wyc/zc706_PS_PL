@@ -18,7 +18,7 @@ proc run_create {} {
     set projDir [get_property directory [current_project]]
 
     add_files -fileset [current_fileset] -force -norecurse {
-        ../src/axi_hp_wr.v
+        ../src/axi_write.v
         ../src/axi_lite_to_mm.v
         ../src/regfile.v
         ../src/soc_wrapper.v
@@ -27,8 +27,9 @@ proc run_create {} {
         ../src/WIDTH8to32.v
         ../src/WIDTH32to8.v
         ../src/gen_lvds_data.v
-        ../src/lvds2hp.v
+        ../src/axi_read.v
         ../src/rx_lvds.v
+		../src/axi_write_lvds.v
     }
 	
 
